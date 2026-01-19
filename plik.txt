@@ -1,0 +1,91 @@
+
+import matplotlib.pyplot as plt
+
+
+def _build_series(results_list):
+    fractions = sorted({row["mask_fraction"] for row in results_list})
+    series = {}
+    for row in results_list:
+        method = row["method"]
+        series.setdefault(method, {"mask_fraction": [], "mse": [], "mae": []})
+        series[method]["mask_fraction"].append(row["mask_fraction"])
+        series[method]["mse"].append(row["mse"])
+        series[method]["mae"].append(row["mae"])
+    # sort per method by mask_fraction
+    for method, vals in series.items():
+        order = sorted(range(len(vals["mask_fraction"])), key=lambda i: vals["mask_fraction"][i])
+        for k in ["mask_fraction", "mse", "mae"]:
+            vals[k] = [vals[k][i] for i in order]
+    return fractions, series
+
+
+def _plot_lines(series, metric, ax, title, order=None):
+    methods = order if order is not None else sorted(series.keys())
+    for method in methods:
+        if method not in series:
+            continue
+        ax.plot(
+            series[method]["mask_fraction"],
+            series[method][metric],
+            marker="o",
+            label=method,
+        )
+    ax.set_xlabel("mask_fraction")
+    ax.set_ylabel(metric.upper())
+    ax.set_title(title)
+    ax.grid(True, alpha=0.3)
+    ax.legend()
+
+
+def _plot_improvement(results_list, unet_key, baseline_keys, ax, title):
+    fractions = sorted({row["mask_fraction"] for row in results_list})
+    improvements = []
+    labels = []
+    for frac in fractions:
+        unet_vals = [r["mse"] for r in results_list if r["mask_fraction"] == frac and r["method"] == unet_key]
+        baseline_vals = [r["mse"] for r in results_list if r["mask_fraction"] == frac and r["method"] in baseline_keys]
+        if not unet_vals or not baseline_vals:
+            continue
+        best_baseline = min(baseline_vals)
+        improvement = (best_baseline - unet_vals[0]) / max(1e-12, best_baseline) * 100.0
+        improvements.append(improvement)
+        labels.append(str(frac))
+    ax.bar(labels, improvements, color="#4c72b0")
+    ax.set_xlabel("mask_fraction")
+    ax.set_ylabel("MSE improvement vs best baseline (%)")
+    ax.set_title(title)
+    ax.axhline(0, color="black", linewidth=0.8)
+    ax.grid(True, axis="y", alpha=0.3)
+
+
+def _plot_results_grid(results_list, label, order):
+    _, series = _build_series(results_list)
+    fig, axes = plt.subplots(1, 2, figsize=(12, 4))
+    _plot_lines(series, "mse", axes[0], f"{label}: MSE vs mask_fraction", order)
+    _plot_lines(series, "mae", axes[1], f"{label}: MAE vs mask_fraction", order)
+    plt.tight_layout()
+    plt.show()
+
+
+if "results" in globals():
+    _plot_results_grid(results, "Random mask", ["unet", "linear", "nearest", "min"])
+else:
+    print("Missing results. Run the training cell first.")
+
+if "results_block" in globals():
+    _plot_results_grid(results_block, "Block mask", ["unet_block", "linear_block", "nearest_block", "min_block"])
+else:
+    print("Missing results_block. Run the block-mask training cell first.")
+
+# Improvement over best baseline (MSE)
+fig, axes = plt.subplots(1, 2, figsize=(12, 4))
+if "results" in globals():
+    _plot_improvement(results, "unet", {"linear", "nearest", "min"}, axes[0], "Random mask")
+else:
+    axes[0].set_title("Random mask (missing)")
+if "results_block" in globals():
+    _plot_improvement(results_block, "unet_block", {"linear_block", "nearest_block", "min_block"}, axes[1], "Block mask")
+else:
+    axes[1].set_title("Block mask (missing)")
+plt.tight_layout()
+plt.show()
